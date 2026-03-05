@@ -8,7 +8,7 @@ export async function copyToClipboard(text: string): Promise<boolean> {
 }
 
 export function getShareUrl(resultId: string): string {
-  const base = process.env.NEXT_PUBLIC_BASE_URL || 'https://resignation-lab.vercel.app';
+  const base = process.env.NEXT_PUBLIC_BASE_URL || 'https://viral-quit-test.vercel.app';
   return `${base}/result/${resultId}`;
 }
 

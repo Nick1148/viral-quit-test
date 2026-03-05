@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Noto_Sans_KR } from "next/font/google";
 import { Analytics } from "@vercel/analytics/react";
-import Script from "next/script";
+import KakaoScript from "@/components/KakaoScript";
 import "./globals.css";
 
 const notoSansKR = Noto_Sans_KR({
@@ -35,14 +35,7 @@ export default function RootLayout({
       >
         {children}
         <Analytics />
-        {process.env.NEXT_PUBLIC_KAKAO_JS_KEY && (
-          <Script
-            src="https://t1.kakaocdn.net/kakao_js_sdk/2.7.4/kakao.min.js"
-            integrity="sha384-DKYJZ8NLiK8MN4/C5P2dtSmLQ4KwPaoqAfyA/DfmOGfnvRDJpJEIKBn6IWRBYnr"
-            crossOrigin="anonymous"
-            strategy="lazyOnload"
-          />
-        )}
+        <KakaoScript />
       </body>
     </html>
   );
