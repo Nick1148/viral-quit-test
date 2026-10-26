@@ -19,10 +19,27 @@ export const RESIGN_REASONS = [
   '출퇴근이 너무 힘들어서',
 ] as const;
 
-export function getStylePrompt(style: ResignStyle, reason: string, name: string): string {
+export function isResignStyle(value: unknown): value is ResignStyle {
+  return RESIGN_STYLES.some((s) => s.id === value);
+}
+
+export function isResignReason(value: unknown): value is (typeof RESIGN_REASONS)[number] {
+  return (RESIGN_REASONS as readonly string[]).includes(value as string);
+}
+
+// 사직서는 사유+스타일 단위로 캐시되므로 실제 이름 대신 이 자리표시자로 생성·저장하고,
+// 응답할 때 요청자의 이름으로 바꾼다. (다른 사람 이름이 들어간 사직서가 재사용되지 않도록)
+export const NAME_PLACEHOLDER = '{{이름}}';
+
+export function fillName(template: string, name: string): string {
+  return template.split(NAME_PLACEHOLDER).join(name || 'OOO');
+}
+
+export function getStylePrompt(style: ResignStyle, reason: string): string {
+  const name = NAME_PLACEHOLDER;
   const base = `당신은 사직서 작성 전문가입니다. 아래 조건에 맞는 사직서를 작성해주세요.
 - 퇴사 사유: ${reason}
-- 작성자 이름: ${name || 'OOO'}
+- 작성자 이름: ${name} (이름이 들어갈 자리에는 반드시 ${name} 를 글자 그대로 쓰세요)
 - 분량: 200~400자
 - 사직서의 형식은 갖추되, 각 스타일의 특색을 살려주세요.
 - 재미있고 공감되면서도 약간의 감동이 있어야 합니다.`;
@@ -41,7 +58,7 @@ export function getStylePrompt(style: ResignStyle, reason: string, name: string)
 - "Yo" 또는 "Check it"으로 시작`,
     joseon: `${base}
 스타일: 조선왕조실록 고어체
-- "신하 ${name || 'OOO'} 엎드려 아뢰옵니다"로 시작
+- "신하 ${name} 엎드려 아뢰옵니다"로 시작
 - ~하옵니다, ~이옵니다 등 고어체
 - 직장을 조정에, 상사를 영상으로 비유
 - 마지막은 "삼가 글월을 올리옵니다"로 마무리`,
@@ -62,9 +79,12 @@ export function getStylePrompt(style: ResignStyle, reason: string, name: string)
   return styleGuides[style];
 }
 
+// v2: 이름 자리표시자 방식으로 바뀌면서 예전(실명이 박힌) 캐시를 쓰지 않도록 키를 바꿨다.
+const CACHE_VERSION = 'v2';
+
 export function hashReasonStyle(reason: string, style: string): string {
   let hash = 0;
-  const str = `${reason}:${style}`;
+  const str = `${CACHE_VERSION}:${reason}:${style}`;
   for (let i = 0; i < str.length; i++) {
     const char = str.charCodeAt(i);
     hash = ((hash << 5) - hash) + char;

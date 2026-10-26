@@ -1,31 +1,51 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getSupabase } from '@/lib/supabase';
-import { hashReasonStyle, getStylePrompt, ResignStyle } from '@/lib/claude';
+import {
+  hashReasonStyle,
+  getStylePrompt,
+  fillName,
+  isResignReason,
+  isResignStyle,
+  NAME_PLACEHOLDER,
+  ResignStyle,
+} from '@/lib/claude';
+import { getNextKstMidnight } from '@/lib/kst';
+import { normalizeText, AUTHOR_NAME_MAX } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
 
 const isMockMode = !process.env.GEMINI_API_KEY ||
   process.env.GEMINI_API_KEY === 'your_gemini_api_key';
 
-// In-memory rate limiting (use Redis in production)
+// 인스턴스 메모리 기반 제한이라 서버리스 인스턴스마다 따로 센다. 정확한 제한이 필요하면 Redis/DB 로 옮겨야 한다.
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 const DAILY_LIMIT = 5;
+const GEMINI_TIMEOUT_MS = 20_000;
 
 function getClientIp(request: NextRequest): string {
+  // Vercel 이 채워주는 request.ip / x-real-ip 를 우선한다 (x-forwarded-for 앞부분은 클라이언트가 조작 가능)
+  const ip = (request as NextRequest & { ip?: string }).ip;
+  if (ip) return ip;
+  const realIp = request.headers.get('x-real-ip');
+  if (realIp) return realIp.trim();
   const forwarded = request.headers.get('x-forwarded-for');
   if (forwarded) return forwarded.split(',')[0].trim();
-  const realIp = request.headers.get('x-real-ip');
-  if (realIp) return realIp;
   return 'unknown';
 }
 
-function checkRateLimit(ip: string): boolean {
-  const now = Date.now();
-  const entry = rateLimitMap.get(ip);
+// "하루"는 한국 시간 자정 기준으로 초기화한다.
+function checkRateLimit(ip: string, now = Date.now()): boolean {
+  // 만료된 항목 정리 (메모리 누수 방지)
+  if (rateLimitMap.size > 10_000) {
+    rateLimitMap.forEach((v, k) => {
+      if (now >= v.resetAt) rateLimitMap.delete(k);
+    });
+  }
 
-  if (!entry || now > entry.resetAt) {
-    rateLimitMap.set(ip, { count: 1, resetAt: now + 24 * 60 * 60 * 1000 });
+  const entry = rateLimitMap.get(ip);
+  if (!entry || now >= entry.resetAt) {
+    rateLimitMap.set(ip, { count: 1, resetAt: getNextKstMidnight(now) });
     return true;
   }
 
@@ -36,8 +56,8 @@ function checkRateLimit(ip: string): boolean {
 }
 
 // Mock 사직서 생성 (API 키 없이 테스트용)
-function generateMockLetter(style: ResignStyle, reason: string, name: string): string {
-  const n = name || 'OOO';
+function generateMockLetter(style: ResignStyle, reason: string): string {
+  const n = NAME_PLACEHOLDER;
   const mockLetters: Record<ResignStyle, string> = {
     poetic: `가을바람이 사무실 창문을 두드리던 날,
 ${n}은(는) 깨달았습니다.
@@ -141,61 +161,76 @@ ${n} 드림`,
 }
 
 export async function POST(request: NextRequest) {
+  let body: Record<string, unknown>;
   try {
-    const { reason, style, name } = await request.json();
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: '잘못된 요청 형식입니다.' }, { status: 400 });
+  }
 
-    if (!reason || !style) {
-      return NextResponse.json({ error: '사유와 스타일을 선택해주세요.' }, { status: 400 });
-    }
+  const { reason, style } = body ?? {};
+  if (!isResignReason(reason) || !isResignStyle(style)) {
+    return NextResponse.json({ error: '사유와 스타일을 목록에서 선택해주세요.' }, { status: 400 });
+  }
 
-    // Rate limit check
-    const ip = getClientIp(request);
-    if (!checkRateLimit(ip)) {
-      return NextResponse.json(
-        { error: '하루 생성 횟수(5회)를 초과했습니다. 내일 다시 시도해주세요.' },
-        { status: 429 }
-      );
-    }
+  const name = normalizeText(body.name).replace(/[{}]/g, '');
+  if (name.length > AUTHOR_NAME_MAX) {
+    return NextResponse.json({ error: `이름은 ${AUTHOR_NAME_MAX}자 이하로 입력해주세요.` }, { status: 400 });
+  }
 
-    // Cache lookup
+  // Rate limit check
+  const ip = getClientIp(request);
+  if (!checkRateLimit(ip)) {
+    return NextResponse.json(
+      { error: `하루 생성 횟수(${DAILY_LIMIT}회)를 초과했습니다. 내일(자정 이후) 다시 시도해주세요.` },
+      { status: 429 },
+    );
+  }
+
+  try {
+    // Cache lookup — 같은 키가 여러 행이어도 깨지지 않도록 maybeSingle 대신 limit(1)
     const hash = hashReasonStyle(reason, style);
-    const { data: cached } = await getSupabase()
+    const { data: cachedRows } = await getSupabase()
       .from('resign_letters')
       .select('content')
       .eq('reason_hash', hash)
       .eq('style', style)
-      .maybeSingle();
+      .limit(1);
 
+    const cached = Array.isArray(cachedRows) ? cachedRows[0] : null;
     if (cached?.content) {
-      return NextResponse.json({ letter: cached.content });
+      return NextResponse.json({ letter: fillName(cached.content, name) });
     }
 
-    let content: string;
+    let template: string;
 
     if (isMockMode) {
-      content = generateMockLetter(style as ResignStyle, reason, name || '');
+      template = generateMockLetter(style, reason);
     } else {
-      // Gemini API 호출
       const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-      const prompt = getStylePrompt(style as ResignStyle, reason, name || '');
-      const result = await model.generateContent(prompt);
-      content = result.response.text();
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' }, { timeout: GEMINI_TIMEOUT_MS });
+      const result = await model.generateContent(getStylePrompt(style, reason));
+      template = result.response.text().trim();
     }
 
-    // Save to cache
-    await getSupabase().from('resign_letters').insert({
+    if (!template) {
+      return NextResponse.json({ error: '사직서 생성에 실패했습니다. 다시 시도해주세요.' }, { status: 502 });
+    }
+
+    // Save to cache (실패해도 응답은 정상 반환)
+    const { error: insertError } = await getSupabase().from('resign_letters').insert({
       reason_hash: hash,
       style,
-      content,
+      content: template,
     });
+    if (insertError) console.error('Resign cache insert error:', insertError);
 
-    return NextResponse.json({ letter: content });
+    return NextResponse.json({ letter: fillName(template, name) });
   } catch (error) {
     console.error('Resign API error:', error);
     return NextResponse.json(
-      { error: '사직서 생성 중 오류가 발생했습니다.' },
-      { status: 500 }
+      { error: '사직서 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.' },
+      { status: 500 },
     );
   }
 }

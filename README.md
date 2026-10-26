@@ -1,36 +1,27 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 퇴사연구소
 
-## Getting Started
+직장인 퇴사확률 테스트(10문항) · AI 사직서 생성기(Gemini) · 회사별 퇴사확률 랭킹. Next.js 14(App Router) + Supabase.
 
-First, run the development server:
+## 개발
 
 ```bash
+npm ci
+cp .env.example .env.local   # 값이 비어 있으면 Supabase/Gemini 는 인메모리 Mock 으로 동작
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 검사
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm run lint        # ESLint
+npm run typecheck   # tsc --noEmit
+npm test            # vitest (점수 계산·입력 검증·KST 날짜·통계)
+npm run build
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 데이터베이스
 
-## Learn More
+- 처음 만들 때: `supabase-schema.sql`
+- 보안 강화: `SUPABASE_SERVICE_ROLE_KEY` 를 배포 환경에 넣은 **뒤에** `supabase/migrations/20261027000000_harden_rls.sql` 실행
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+환경변수 설명은 `.env.example`, 2026-10-27 점검 내역은 `작업보고.md` 를 참고하세요.

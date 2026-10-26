@@ -1,79 +1,82 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabase } from '@/lib/supabase';
+import { calculateScore } from '@/lib/questions';
+import { getResultType } from '@/lib/results';
+import { getResultWithStats } from '@/lib/stats';
+import { normalizeCompanyName, parseAnswers, COMPANY_NAME_MAX } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
+  let body: Record<string, unknown>;
   try {
-    const body = await request.json();
-    const { company_name, score, title_type, answers } = body;
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: '잘못된 요청 형식입니다.' }, { status: 400 });
+  }
+  if (!body || typeof body !== 'object') {
+    return NextResponse.json({ error: '잘못된 요청 형식입니다.' }, { status: 400 });
+  }
 
-    if (typeof score !== 'number' || !company_name || !title_type) {
-      return NextResponse.json({ error: '필수 항목이 누락되었습니다.' }, { status: 400 });
-    }
+  const companyName = normalizeCompanyName(body.company_name);
+  if (!companyName) {
+    return NextResponse.json(
+      { error: `회사명을 1~${COMPANY_NAME_MAX}자로 입력해주세요.` },
+      { status: 400 },
+    );
+  }
 
+  const answers = parseAnswers(body.answers);
+  if (!answers) {
+    return NextResponse.json({ error: '답변이 올바르지 않습니다.' }, { status: 400 });
+  }
+
+  // 점수와 결과 유형은 클라이언트 값을 믿지 않고 서버에서 다시 계산한다.
+  const score = calculateScore(answers);
+  const titleType = getResultType(score).title;
+
+  try {
     const { data, error } = await getSupabase()
       .from('results')
-      .insert({ company_name, score, title_type, answers })
+      .insert({ company_name: companyName, score, title_type: titleType, answers })
       .select('id')
       .single();
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error || !data?.id) {
+      console.error('Result insert error:', error);
+      return NextResponse.json({ error: '결과 저장 중 오류가 발생했습니다.' }, { status: 500 });
     }
 
-    return NextResponse.json({ id: data.id });
-  } catch {
+    return NextResponse.json({ id: data.id, score });
+  } catch (error) {
+    console.error('Result API error:', error);
     return NextResponse.json({ error: '서버 오류가 발생했습니다.' }, { status: 500 });
   }
 }
 
 export async function GET(request: NextRequest) {
+  const id = request.nextUrl.searchParams.get('id');
+  if (!id) {
+    return NextResponse.json({ error: 'id 파라미터가 필요합니다.' }, { status: 400 });
+  }
+
   try {
-    const id = request.nextUrl.searchParams.get('id');
-
-    if (!id) {
-      return NextResponse.json({ error: 'id 파라미터가 필요합니다.' }, { status: 400 });
-    }
-
-    const { data: result, error } = await getSupabase()
-      .from('results')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (error || !result) {
+    const data = await getResultWithStats(id);
+    if (!data) {
       return NextResponse.json({ error: '결과를 찾을 수 없습니다.' }, { status: 404 });
     }
-
-    // 해당 회사 통계 조회
-    const { data: companyResults } = await getSupabase()
-      .from('results')
-      .select('score')
-      .eq('company_name', result.company_name);
-
-    let companyAvg: number | null = null;
-    let participantCount = 0;
-    let rankPercent: number | null = null;
-
-    if (companyResults && companyResults.length > 0) {
-      participantCount = companyResults.length;
-      const totalScore = companyResults.reduce((sum: number, r: { score: number }) => sum + r.score, 0);
-      companyAvg = Math.round(totalScore / participantCount);
-
-      const higherCount = companyResults.filter((r: { score: number }) => r.score > result.score).length;
-      rankPercent = Math.round(((higherCount + 1) / participantCount) * 100);
-    }
-
+    // 회사명·답안은 공개 응답에 넣지 않는다.
     return NextResponse.json({
-      result,
-      stats: {
-        companyAvg,
-        participantCount,
-        rankPercent,
+      result: {
+        id: data.result.id,
+        score: data.result.score,
+        title_type: data.result.title_type,
+        created_at: data.result.created_at,
       },
+      stats: data.stats,
     });
-  } catch {
+  } catch (error) {
+    console.error('Result API error:', error);
     return NextResponse.json({ error: '서버 오류가 발생했습니다.' }, { status: 500 });
   }
 }

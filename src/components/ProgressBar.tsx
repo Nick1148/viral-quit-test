@@ -4,18 +4,26 @@ interface ProgressBarProps {
 }
 
 export default function ProgressBar({ current, total }: ProgressBarProps) {
-  const percent = Math.round((current / total) * 100);
+  const percent = total > 0 ? Math.min(100, Math.max(0, Math.round((current / total) * 100))) : 0;
 
   return (
     <div className="sticky top-0 z-50 w-full bg-white/80 backdrop-blur-sm py-3 px-4">
       <div className="max-w-lg mx-auto">
-        <div className="flex justify-between items-center mb-1">
-          <span className="text-xs text-gray-500 font-medium">
+        <div className="flex justify-between items-center mb-1" aria-hidden="true">
+          <span className="text-xs text-gray-600 font-medium">
             {current} / {total}
           </span>
-          <span className="text-xs text-indigo-600 font-bold">{percent}%</span>
+          <span className="text-xs text-indigo-700 font-bold">{percent}%</span>
         </div>
-        <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+        <div
+          role="progressbar"
+          aria-label="테스트 진행률"
+          aria-valuemin={0}
+          aria-valuemax={total}
+          aria-valuenow={current}
+          aria-valuetext={`${total}개 중 ${current}번째 질문`}
+          className="w-full h-2 bg-gray-200 rounded-full overflow-hidden"
+        >
           <div
             className="h-full rounded-full bg-gradient-to-r from-indigo-400 to-purple-500 transition-all duration-500 ease-out"
             style={{ width: `${percent}%` }}

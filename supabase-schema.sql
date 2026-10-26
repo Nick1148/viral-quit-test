@@ -1,4 +1,6 @@
 -- 퇴사연구소 DB 스키마 (Supabase에서 SQL Editor로 실행)
+-- ※ 아래 '모든 사용자가 읽기/쓰기 가능' 정책은 anon 키로 데이터 조회·조작·캐시 오염이 가능하다.
+--   SUPABASE_SERVICE_ROLE_KEY 설정 후 supabase/migrations/20261027000000_harden_rls.sql 을 이어서 실행할 것.
 
 -- 결과 테이블
 CREATE TABLE results (

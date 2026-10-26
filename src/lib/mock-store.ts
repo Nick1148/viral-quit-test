@@ -67,6 +67,9 @@ class MockQueryBuilder<T> {
   private isSingle = false;
   private isMaybeSingle = false;
   private insertData: Partial<T> | null = null;
+  private limitCount: number | null = null;
+  private rangeFrom = 0;
+  private rangeTo: number | null = null;
 
   constructor(table: string) {
     this.table = table;
@@ -104,7 +107,13 @@ class MockQueryBuilder<T> {
   }
 
   limit(count: number) {
-    void count;
+    this.limitCount = count;
+    return this;
+  }
+
+  range(from: number, to: number) {
+    this.rangeFrom = from;
+    this.rangeTo = to;
     return this;
   }
 
@@ -141,11 +150,17 @@ class MockQueryBuilder<T> {
       return { data: (rows[0] as T) ?? null, error: null };
     }
 
+    if (this.rangeTo !== null) rows = rows.slice(this.rangeFrom, this.rangeTo + 1);
+    if (this.limitCount !== null) rows = rows.slice(0, this.limitCount);
+
     return { data: rows as T[], error: null };
   }
 
-  then(resolve: (value: { data: T | T[] | null; error: null }) => void) {
-    return this.execute().then(resolve);
+  then(
+    resolve: (value: { data: T | T[] | null; error: null }) => void,
+    reject?: (reason: unknown) => void,
+  ) {
+    return this.execute().then(resolve, reject);
   }
 }
 
